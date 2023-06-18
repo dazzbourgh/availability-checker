@@ -1,3 +1,1 @@
-
-rootProject.name = "italy-appointment-checker"
-
+rootProject.name = "availability-checker"
