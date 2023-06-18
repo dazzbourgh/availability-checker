@@ -12,15 +12,15 @@ fun interface Waiter {
     suspend fun wait(delay: Duration)
 }
 
-context(LogError, Waiter, Raise<E>)
-tailrec suspend fun <T, E> retry(
+context(LogError, Waiter)
+tailrec suspend fun <T> retry(
     times: Int,
     delay: Duration,
     condition: (T) -> Boolean,
-    error: E,
+    default: T,
     block: suspend () -> T
 ): T =
-    if (times == 0) raise(error)
+    if (times == 0) default
     else {
         val result = try {
             block()
@@ -32,13 +32,9 @@ tailrec suspend fun <T, E> retry(
         }
         if (result != null) result else {
             wait(delay)
-            retry(times - 1, delay, condition, error, block)
+            retry(times - 1, delay, condition, default, block)
         }
     }
-
-context(LogError, Waiter, Raise<E>)
-suspend fun <T, E> retry(times: Int, delay: Duration, error: E, block: suspend () -> T): T =
-    retry(times, delay, { true }, error, block)
 
 context(Raise<E>)
 fun <E> WebDriver.findByXpath(xpathExpression: String, error: E): WebElement =
@@ -48,3 +44,9 @@ fun <E> WebDriver.findByXpath(xpathExpression: String, error: E): WebElement =
             { error.left() }
         )
         .bind()
+
+fun WebDriver.findElementOrNull(by: By) = try {
+    findElement(by)
+} catch (_: NoSuchElementException) {
+    null
+}

@@ -3,16 +3,8 @@ package checker
 import arrow.core.raise.either
 import org.openqa.selenium.By
 import org.openqa.selenium.WebDriver
-import util.Log
-import util.Waiter
-import util.findByXpath
-import util.retry
+import util.*
 import kotlin.time.Duration.Companion.seconds
-
-private sealed class Error
-private class ButtonNotFound(val name: String) : Error()
-private class FieldNotFound(val name: String) : Error()
-private object PopUpNotFound : Error()
 
 data class Credentials(val email: String, val password: String)
 
@@ -29,48 +21,28 @@ class ItalianConsulateChecker(
         private const val popupSelector = "div.jconfirm-content"
     }
 
-    override suspend fun check(): Boolean = with(waiter) {
+    override suspend fun check(): CheckResult = with(waiter) {
         with(log) {
-            val driver = chromeDriverFactory()
-            driver.get(startingUrl)
-            val result = either {
-
-                val email = driver.findByXpath(emailXPath, FieldNotFound("email"))
-                val password = driver.findByXpath(passwordXPath, FieldNotFound("password"))
-                val submitButton = driver.findByXpath(loginButtonXPath, ButtonNotFound("sign in"))
+            either {
+                val driver = chromeDriverFactory()
+                driver.get(startingUrl)
+                val email = driver.findByXpath(emailXPath, Failure("email field not found"))
+                val password = driver.findByXpath(passwordXPath, Failure("password field not found"))
+                val submitButton = driver.findByXpath(loginButtonXPath, Failure("sign in button not found"))
 
                 email.sendKeys(credentials.email)
                 wait(1.seconds)
                 password.sendKeys(credentials.password)
                 wait(1.seconds)
                 submitButton.click()
-
                 wait(5.seconds)
 
-                retry(2, 10.seconds, PopUpNotFound) {
-                    driver.findElement(By.cssSelector(popupSelector))
+                val result = retry(2, 10.seconds, { it != null }, null) {
+                    driver.findElementOrNull(By.cssSelector(popupSelector))
                 }
-
-                Unit
-            }
-            result.fold({
-                when (it) {
-                    is ButtonNotFound -> {
-                        error("Button not found: ${it.name}")
-                        false
-                    }
-
-                    is FieldNotFound -> {
-                        error("Field not found: ${it.name}")
-                        false
-                    }
-
-                    PopUpNotFound -> true
-                }
-            }, {
-                info("No appointments available")
-                false
-            })
+                driver.close()
+                if (result == null) Success else raise(Failure("no appointments available"))
+            }.fold({ it }, { it })
         }
     }
 
