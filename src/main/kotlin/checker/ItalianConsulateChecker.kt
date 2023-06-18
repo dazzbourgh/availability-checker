@@ -1,9 +1,11 @@
 package checker
 
-import arrow.core.raise.either
 import org.openqa.selenium.By
 import org.openqa.selenium.WebDriver
-import util.*
+import util.Log
+import util.Waiter
+import util.findElementOrNull
+import util.retry
 import kotlin.time.Duration.Companion.seconds
 
 data class Credentials(val email: String, val password: String)
@@ -23,26 +25,28 @@ class ItalianConsulateChecker(
 
     override suspend fun check(): CheckResult = with(waiter) {
         with(log) {
-            either {
-                driver.get(startingUrl)
-                val email = driver.findByXpath(emailXPath, Failure("email field not found"))
-                val password = driver.findByXpath(passwordXPath, Failure("password field not found"))
-                val submitButton = driver.findByXpath(loginButtonXPath, Failure("sign in button not found"))
+            driver.get(startingUrl)
 
-                email.sendKeys(credentials.email)
-                wait(1.seconds)
-                password.sendKeys(credentials.password)
-                wait(1.seconds)
-                submitButton.click()
-                wait(5.seconds)
+            val email = driver.findByXPath(emailXPath) ?: return Failure("email field not found")
+            val password = driver.findByXPath(passwordXPath) ?: return Failure("password field not found")
+            val submitButton = driver.findByXPath(loginButtonXPath) ?: return Failure("sign in button not found")
 
-                val result = retry(2, 10.seconds, { it != null }, null) {
-                    driver.findElementOrNull(By.cssSelector(popupSelector))
-                }
-                if (result == null) Success else raise(Failure("no appointments available"))
-            }.fold({ it }, { it })
+            email.sendKeys(credentials.email)
+            wait(1.seconds)
+            password.sendKeys(credentials.password)
+            wait(1.seconds)
+            submitButton.click()
+            wait(5.seconds)
+
+            val result = retry(2, 10.seconds, { it != null }, null) {
+                driver.findElementOrNull(By.cssSelector(popupSelector))
+            }
+            if (result == null) Success else Failure("no appointments available")
         }
     }
+
+    private fun WebDriver.findByXPath(xpath: String) =
+        findElementOrNull(By.xpath(xpath))
 
     override val name: String = "Italian tourist visa appointment in Houston's consulate"
     override val startingUrl: String = "https://prenotami.esteri.it/Services/Booking/1250"
