@@ -1,3 +1,5 @@
+import arrow.fx.coroutines.resource
+import arrow.fx.coroutines.resourceScope
 import checker.Credentials
 import checker.Failure
 import checker.ItalianConsulateChecker
@@ -7,9 +9,7 @@ import dev.inmo.tgbotapi.types.ChatId
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import notifier.Notifier
 import notifier.telegram.TelegramNotifier
-import org.openqa.selenium.WebDriver
 import org.openqa.selenium.chrome.ChromeDriver
 import org.openqa.selenium.chrome.ChromeOptions
 import util.ConsoleLog
@@ -23,29 +23,45 @@ fun main() = runBlocking {
     val token = System.getenv("telegram_token")
     val chatIdentifier = System.getenv("telegram_chat_id").toLong()
 
-    val chromeDriverFactory: () -> WebDriver = {
+    val driverFactory = {
         ChromeDriver(ChromeOptions().apply {
             addArguments("--headless=new")
         })
     }
-    val waiter = Waiter { delay(it) }
     val credentials = Credentials(email, password)
-    val bot = telegramBot(token)
+    val waiter = Waiter { delay(it) }
     val chatId = ChatId(chatIdentifier)
-    val notifier: Notifier = TelegramNotifier(bot, chatId)
-    val checker = ItalianConsulateChecker(chromeDriverFactory, waiter, ConsoleLog, credentials)
-    val notification = "${checker.name} is available at: ${checker.startingUrl}"
 
-    runCatching { withTimeout(timeout) { checker.check() } }
-        .fold(
-            onSuccess = { result ->
-                when (result) {
-                    is Failure -> ConsoleLog.info(result.message)
-                    Success -> notifier.notify(notification)
-                }
-            },
-            onFailure = {
-                notifier.notify("Error occurred: $it")
-            }
+    val chromeDriverResource = resource(driverFactory) { driver, _ ->
+        driver.close()
+        driver.quit()
+    }
+    val botResource = resource({ telegramBot(token) }) { bot, _ -> bot.close() }
+    val notifierResource = resource { TelegramNotifier(botResource.bind(), chatId) }
+    val checkerResource = resource {
+        ItalianConsulateChecker(
+            chromeDriverResource.bind(),
+            waiter,
+            ConsoleLog,
+            credentials
         )
+    }
+    resourceScope {
+        val notifier = notifierResource.bind()
+        val checker = checkerResource.bind()
+        val notification = "${checker.name} is available at: ${checker.startingUrl}"
+
+        runCatching { withTimeout(timeout) { checker.check() } }
+            .fold(
+                onSuccess = { result ->
+                    when (result) {
+                        is Failure -> ConsoleLog.info(result.message)
+                        Success -> notifier.notify(notification)
+                    }
+                },
+                onFailure = {
+                    notifier.notify("Error occurred: $it")
+                }
+            )
+    }
 }

@@ -9,7 +9,7 @@ import kotlin.time.Duration.Companion.seconds
 data class Credentials(val email: String, val password: String)
 
 class ItalianConsulateChecker(
-    private val chromeDriverFactory: () -> WebDriver,
+    private val driver: WebDriver,
     private val waiter: Waiter,
     private val log: Log,
     private val credentials: Credentials
@@ -24,7 +24,6 @@ class ItalianConsulateChecker(
     override suspend fun check(): CheckResult = with(waiter) {
         with(log) {
             either {
-                val driver = chromeDriverFactory()
                 driver.get(startingUrl)
                 val email = driver.findByXpath(emailXPath, Failure("email field not found"))
                 val password = driver.findByXpath(passwordXPath, Failure("password field not found"))
@@ -40,7 +39,6 @@ class ItalianConsulateChecker(
                 val result = retry(2, 10.seconds, { it != null }, null) {
                     driver.findElementOrNull(By.cssSelector(popupSelector))
                 }
-                driver.close()
                 if (result == null) Success else raise(Failure("no appointments available"))
             }.fold({ it }, { it })
         }
