@@ -1,5 +1,8 @@
 package checker
 
+import arrow.fx.coroutines.parZip
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.coroutineScope
 import org.openqa.selenium.By
 import org.openqa.selenium.WebDriver
 import util.Log
@@ -21,29 +24,43 @@ class ItalianConsulateChecker(
         private const val passwordXPath = "//*[@id=\"login-password\"]"
         private const val loginButtonXPath = "//*[@id=\"login-form\"]/button"
         private const val popupSelector = "div.jconfirm-content"
+        private const val tableId = "dataTableServices"
     }
 
-    override suspend fun check(): CheckResult = with(waiter) {
-        with(log) {
-            driver.get(startingUrl)
+    override suspend fun check(): CheckResult = coroutineScope {
+        with(waiter) {
+            with(log) {
+                driver.get(startingUrl)
 
-            val email = driver.findByXPath(emailXPath) ?: return Failure("email field not found")
-            val password = driver.findByXPath(passwordXPath) ?: return Failure("password field not found")
-            val submitButton = driver.findByXPath(loginButtonXPath) ?: return Failure("sign in button not found")
+                val email =
+                    driver.findByXPath(emailXPath) ?: return@coroutineScope Failure("email field not found")
+                val password =
+                    driver.findByXPath(passwordXPath) ?: return@coroutineScope Failure("password field not found")
+                val submitButton =
+                    driver.findByXPath(loginButtonXPath) ?: return@coroutineScope Failure("sign in button not found")
 
-            email.sendKeys(credentials.email)
-            wait(1.seconds)
-            password.sendKeys(credentials.password)
-            wait(1.seconds)
-            submitButton.click()
-            wait(5.seconds)
+                email.sendKeys(credentials.email)
+                wait(1.seconds)
+                password.sendKeys(credentials.password)
+                wait(1.seconds)
+                submitButton.click()
+                wait(5.seconds)
 
-            val result = retry(2, 10.seconds, { it != null }, null) {
-                driver.findElementOrNull(By.cssSelector(popupSelector))
+                parZip(
+                    { driver.findWithRetry(By.cssSelector(popupSelector)) },
+                    { driver.findWithRetry(By.id(tableId)) }
+                ) { popup, table ->
+                    if (popup == null && table == null) Success else Failure("no appointments available")
+                }
             }
-            if (result == null) Success else Failure("no appointments available")
         }
     }
+
+    context(Log, Waiter, CoroutineScope)
+    private suspend fun WebDriver.findWithRetry(by: By) =
+        retry(2, 10.seconds, { it != null }, null) {
+            driver.findElementOrNull(by)
+        }
 
     private fun WebDriver.findByXPath(xpath: String) =
         findElementOrNull(By.xpath(xpath))
